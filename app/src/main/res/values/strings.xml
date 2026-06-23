@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Eddystone Beacon Simulator</string>
+    <string name="subtitle">Simulates many Eddystone-UID beacons with one shared Namespace ID and sequential Instance IDs, for testing the Abeeway BLE sniffer.</string>
+
+    <string name="hint_namespace">Namespace ID (10 bytes / 20 hex chars)</string>
+    <string name="help_namespace">Shared by every simulated beacon, e.g. 0102030405060708090A.</string>
+
+    <string name="hint_count">Number of beacons</string>
+    <string name="hint_dwell">Dwell per beacon (ms)</string>
+    <string name="hint_concurrency">Parallel advertisers</string>
+    <string name="help_advanced">Instance IDs are 0x000000000001…N. Lower dwell + more parallel advertisers = faster full sweep. Most phones only allow a few parallel advertisers; extras self-retire and the rest cover all beacons.</string>
+
+    <string name="start">Start</string>
+    <string name="stop">Stop</string>
+    <string name="idle">○ Idle</string>
+</resources>
