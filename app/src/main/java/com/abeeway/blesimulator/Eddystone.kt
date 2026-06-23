@@ -69,14 +69,26 @@ object Eddystone {
         bytes.joinToString("") { "%02X".format(it) }
 
     /**
-     * Builds [count] Instance IDs as sequential 6-byte big-endian values
-     * 0x000000000001, 0x000000000002, ... All share the same Namespace ID,
-     * which is what we want for testing the Abeeway BLE sniffer.
+     * Prefix applied to the low 16 bits of every Instance ID. The Abeeway
+     * sniffer only reports the last two bytes of the Instance ID as the
+     * beaconId, so the distinguishing value must live there. With this prefix
+     * the IDs become 0x9001, 0x9002, … and the sniffer shows "9001", "9002", …
+     */
+    const val BEACON_ID_PREFIX = 0x9000
+
+    /** The beaconId the sniffer reports for the n-th beacon (1-based), e.g. "9003". */
+    fun beaconId(n: Int): String = "%04X".format(BEACON_ID_PREFIX + n)
+
+    /**
+     * Builds [count] Instance IDs as 6-byte big-endian values whose low two
+     * bytes are [BEACON_ID_PREFIX] + index: 0x000000009001, 0x000000009002, …
+     * All share the same Namespace ID, which is what we want for testing the
+     * Abeeway BLE sniffer (it keys on the last two bytes).
      */
     fun sequentialInstances(count: Int): List<ByteArray> =
         (1..count).map { n ->
             val b = ByteArray(INSTANCE_LEN)
-            var v = n.toLong()
+            var v = (BEACON_ID_PREFIX + n).toLong()
             for (i in INSTANCE_LEN - 1 downTo 0) {
                 b[i] = (v and 0xFF).toByte()
                 v = v shr 8

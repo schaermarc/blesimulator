@@ -185,7 +185,7 @@ class BeaconAdvertiserService : Service() {
                 slot.step++
                 reprogram(slot, beacons[beaconIndex])
                 advertisedCount++
-                lastInstance = "%06d".format(beaconIndex + 1)
+                lastInstance = Eddystone.beaconId(beaconIndex + 1)
             }
 
             val sweeps = if (beacons.isEmpty()) 0L else advertisedCount / beacons.size

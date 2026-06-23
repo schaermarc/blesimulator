@@ -5,7 +5,13 @@ An Android app that simulates many **Eddystone-UID** beacons that all share one
 **Abeeway BLE sniffer** (or any aggregating BLE scanner).
 
 By default it simulates **50 beacons**: namespace `0102030405060708090A`,
-instance IDs `0x000000000001 … 0x000000000032`.
+instance IDs `0x000000009001 … 0x000000009032`.
+
+> **beaconId prefix `9`:** The Abeeway sniffer only reports the **last two
+> bytes** of the Instance ID as the `beaconId`. To make those values
+> recognisable, the low two bytes are `0x9000 + n`, so the sniffer shows
+> `9001`, `9002`, … `9032` (beacon #3 → `"beaconId": "9003"`). The prefix is
+> the `BEACON_ID_PREFIX` constant in `Eddystone.kt`.
 
 ## How it works (important)
 
@@ -40,7 +46,7 @@ Each beacon advertises Service Data for the 16-bit Eddystone UUID `0xFEAA`:
 | 0     | Frame type   | `0x00` (UID)                           |
 | 1     | Ranging data | calibrated Tx power @ 0 m (default −21) |
 | 2–11  | Namespace ID | 10 bytes, shared by all beacons        |
-| 12–17 | Instance ID  | 6 bytes, unique per beacon             |
+| 12–17 | Instance ID  | 6 bytes, low 2 bytes = `0x9000 + n`    |
 | 18–19 | RFU          | `0x00 0x00`                            |
 
 Advertised non-connectable, which fits the Eddystone payload within the 31-byte

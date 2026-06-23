@@ -127,7 +127,7 @@ class MainActivity : AppCompatActivity() {
             sb.append("Active advertisers: ${state.activeAdvertisers}\n")
             sb.append("Full sweeps: ${state.cycles}\n")
             if (state.lastInstanceHex.isNotEmpty()) {
-                sb.append("Last instance: #${state.lastInstanceHex}\n")
+                sb.append("Last beaconId: ${state.lastInstanceHex}\n")
             }
         }
         if (state.message.isNotEmpty()) sb.append("\n${state.message}")
