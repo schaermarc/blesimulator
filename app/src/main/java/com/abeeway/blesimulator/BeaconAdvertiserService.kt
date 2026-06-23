@@ -6,9 +6,10 @@ import android.app.NotificationManager
 import android.app.Service
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
-import android.bluetooth.le.AdvertiseCallback
 import android.bluetooth.le.AdvertiseData
-import android.bluetooth.le.AdvertiseSettings
+import android.bluetooth.le.AdvertisingSet
+import android.bluetooth.le.AdvertisingSetCallback
+import android.bluetooth.le.AdvertisingSetParameters
 import android.bluetooth.le.BluetoothLeAdvertiser
 import android.content.Context
 import android.content.Intent
@@ -17,21 +18,22 @@ import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
+import android.util.Log
 
 /**
  * Foreground service that simulates many Eddystone-UID beacons from a single
  * radio by time-multiplexing.
  *
- * A phone's BLE chip can only run a few advertising sets at once (often 1–8),
- * so 50 *simultaneous* beacons is not physically possible. Instead we rotate:
- * each advertising slot shows one Instance ID for [dwellMs], then switches to
- * the next. A sniffer that aggregates detections (like the Abeeway BLE
- * sniffer) sees every unique beacon within one sweep.
+ * A phone's BLE chip can only run a few advertising sets at once, so 50
+ * *simultaneous* beacons is not physically possible. Instead we rotate: each
+ * advertising slot shows one Instance ID for [dwellMs], then switches to the
+ * next. A sniffer that aggregates detections (like the Abeeway BLE sniffer)
+ * sees every unique beacon within one sweep.
  *
- * Running several slots in parallel speeds up a full sweep. If the hardware
- * refuses a slot (TOO_MANY_ADVERTISERS) we permanently retire it and the
- * remaining slots automatically re-partition the beacon set, so coverage of
- * all beacons is always preserved.
+ * Rotation uses the modern [BluetoothLeAdvertiser.startAdvertisingSet] API and
+ * swaps the payload live with [AdvertisingSet.setAdvertisingData]. This avoids
+ * the stop/start churn of the legacy advertiser, which races on many stacks
+ * (notably Samsung) and dies with ALREADY_STARTED after the first cycle.
  */
 class BeaconAdvertiserService : Service() {
 
@@ -45,40 +47,58 @@ class BeaconAdvertiserService : Service() {
         const val EXTRA_CONCURRENCY = "concurrency"
         const val EXTRA_TX_POWER = "txPower"      // ranging data (dBm)
 
+        const val TAG = "BleSim"
         private const val CHANNEL_ID = "ble_simulator"
         private const val NOTIFICATION_ID = 1
     }
 
-    private lateinit var advertiser: BluetoothLeAdvertiser
-    private var available = false
+    private var advertiser: BluetoothLeAdvertiser? = null
 
     private lateinit var workerThread: HandlerThread
     private lateinit var worker: Handler
 
-    private lateinit var settings: AdvertiseSettings
+    private lateinit var params: AdvertisingSetParameters
     private var beacons: List<ByteArray> = emptyList()   // service-data payloads
     private var namespaceHex: String = ""
     private var dwellMs: Long = 250
 
-    private lateinit var slots: List<Slot>
+    private var slots: List<Slot> = emptyList()
     private var advertisedCount: Long = 0
 
-    /** One concurrent advertiser. [failed] slots are retired and skipped. */
-    private inner class Slot(val id: Int) : AdvertiseCallback() {
-        var failed = false
-        var started = false
+    /** One concurrent advertising set. */
+    private inner class Slot(val id: Int) {
+        @Volatile var set: AdvertisingSet? = null
+        @Volatile var failed = false
+        @Volatile var started = false
         var step = 0
 
-        override fun onStartFailure(errorCode: Int) {
-            if (errorCode == ADVERTISE_FAILED_TOO_MANY_ADVERTISERS && id != 0) {
-                // Retire this slot; survivors re-partition on the next tick.
-                failed = true
-                AdvertiserStatus.update {
-                    it.copy(message = "Slot $id retired (hardware advertiser limit reached)")
+        val callback = object : AdvertisingSetCallback() {
+            override fun onAdvertisingSetStarted(
+                advertisingSet: AdvertisingSet?,
+                txPower: Int,
+                status: Int
+            ) {
+                if (status == ADVERTISE_SUCCESS && advertisingSet != null) {
+                    set = advertisingSet
+                    started = true
+                    Log.i(TAG, "Slot $id started (txPower=$txPower)")
+                    publishRunningStatus()
+                } else {
+                    failed = true
+                    val msg = "Slot $id failed to start: ${decode(status)}"
+                    Log.e(TAG, msg)
+                    AdvertiserStatus.update { it.copy(message = msg) }
                 }
-            } else if (id == 0) {
-                AdvertiserStatus.update {
-                    it.copy(message = "Advertising failed (code $errorCode). Is Bluetooth on?")
+            }
+
+            override fun onAdvertisingSetStopped(advertisingSet: AdvertisingSet?) {
+                started = false
+                set = null
+            }
+
+            override fun onAdvertisingDataSet(advertisingSet: AdvertisingSet?, status: Int) {
+                if (status != ADVERTISE_SUCCESS) {
+                    Log.w(TAG, "Slot $id setAdvertisingData failed: ${decode(status)}")
                 }
             }
         }
@@ -88,13 +108,6 @@ class BeaconAdvertiserService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        val mgr = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-        val adapter: BluetoothAdapter? = mgr.adapter
-        val adv = adapter?.bluetoothLeAdvertiser
-        if (adapter != null && adapter.isEnabled && adv != null) {
-            advertiser = adv
-            available = true
-        }
         workerThread = HandlerThread("ble-rotation").also { it.start() }
         worker = Handler(workerThread.looper)
     }
@@ -111,36 +124,61 @@ class BeaconAdvertiserService : Service() {
     }
 
     private fun startAdvertising(intent: Intent) {
-        startForegroundCompat()
-
-        if (!available) {
-            AdvertiserStatus.update {
-                it.copy(
-                    running = false,
-                    message = "BLE advertising unavailable. Enable Bluetooth and grant the " +
-                        "Nearby devices / BLUETOOTH_ADVERTISE permission."
-                )
-            }
-            return
+        try {
+            startForegroundCompat()
+        } catch (e: Exception) {
+            Log.e(TAG, "startForeground failed", e)
+            AdvertiserStatus.update { it.copy(message = "Foreground service error: ${e.message}") }
         }
 
-        namespaceHex = intent.getStringExtra(EXTRA_NAMESPACE)
-            ?: "0102030405060708090A"
+        val mgr = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        val adapter: BluetoothAdapter? = mgr.adapter
+        if (adapter == null || !adapter.isEnabled) {
+            fail("Bluetooth is off. Turn it on and try again.")
+            return
+        }
+        val adv = adapter.bluetoothLeAdvertiser
+        if (adv == null) {
+            fail("This device does not support BLE advertising.")
+            return
+        }
+        if (!adapter.isMultipleAdvertisementSupported) {
+            // Not fatal for a single advertiser, just note it.
+            Log.w(TAG, "isMultipleAdvertisementSupported=false")
+        }
+        advertiser = adv
+
+        Log.i(
+            TAG,
+            "caps: multiAdv=${adapter.isMultipleAdvertisementSupported} " +
+                "extendedAdv=${adapter.isLeExtendedAdvertisingSupported} " +
+                "maxAdvDataLen=${adapter.leMaximumAdvertisingDataLength}"
+        )
+
+        namespaceHex = intent.getStringExtra(EXTRA_NAMESPACE) ?: "0102030405060708090A"
         val count = intent.getIntExtra(EXTRA_COUNT, 50).coerceIn(1, 1000)
         dwellMs = intent.getIntExtra(EXTRA_DWELL_MS, 250).toLong().coerceIn(50, 10_000)
         val concurrency = intent.getIntExtra(EXTRA_CONCURRENCY, 1).coerceIn(1, 8)
         val txPower = intent.getIntExtra(EXTRA_TX_POWER, -21)
 
-        val namespace = Eddystone.hexToBytes(namespaceHex, Eddystone.NAMESPACE_LEN)
+        val namespace = try {
+            Eddystone.hexToBytes(namespaceHex, Eddystone.NAMESPACE_LEN)
+        } catch (e: Exception) {
+            fail("Invalid namespace: ${e.message}")
+            return
+        }
         beacons = Eddystone.sequentialInstances(count).map { instance ->
             Eddystone.uidServiceData(namespace, instance, txPower)
         }
 
-        settings = AdvertiseSettings.Builder()
-            .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
-            .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
+        // Legacy-mode PDU so every scanner (the Abeeway sniffer, other phones)
+        // can see it. Non-connectable, non-scannable = ADV_NONCONN_IND.
+        params = AdvertisingSetParameters.Builder()
+            .setLegacyMode(true)
             .setConnectable(false)
-            .setTimeout(0)
+            .setScannable(false)
+            .setInterval(AdvertisingSetParameters.INTERVAL_LOW)
+            .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_HIGH)
             .build()
 
         slots = (0 until concurrency).map { Slot(it) }
@@ -150,16 +188,33 @@ class BeaconAdvertiserService : Service() {
             it.copy(
                 running = true,
                 totalBeacons = count,
-                activeAdvertisers = concurrency,
+                activeAdvertisers = 0,
                 cycles = 0,
                 lastInstanceHex = "",
-                message = "Advertising ${count} Eddystone-UID beacons " +
-                    "(namespace $namespaceHex)"
+                message = "Starting $count Eddystone-UID beacons " +
+                    "(namespace $namespaceHex, beaconId ${Eddystone.beaconId(1)}…" +
+                    "${Eddystone.beaconId(count)})"
             )
         }
 
+        // Kick off one advertising set per slot with its first payload.
+        val n = slots.size
+        slots.forEachIndexed { ord, slot ->
+            val firstIndex = ord            // modulo partition, first element
+            if (firstIndex >= beacons.size) return@forEachIndexed
+            val data = buildData(beacons[firstIndex])
+            try {
+                adv.startAdvertisingSet(params, data, null, null, null, slot.callback)
+                Log.i(TAG, "Slot ${slot.id} startAdvertisingSet requested")
+            } catch (e: Exception) {
+                slot.failed = true
+                Log.e(TAG, "Slot ${slot.id} startAdvertisingSet threw", e)
+                AdvertiserStatus.update { it.copy(message = "Advertise error: ${e.message}") }
+            }
+        }
+
         worker.removeCallbacksAndMessages(null)
-        worker.post(rotateRunnable)
+        worker.postDelayed(rotateRunnable, dwellMs)
     }
 
     private val rotateRunnable = object : Runnable {
@@ -176,6 +231,7 @@ class BeaconAdvertiserService : Service() {
             var lastInstance = ""
             // Partition by modulo so the union of all slots covers every beacon.
             active.forEachIndexed { ord, slot ->
+                val set = slot.set ?: return@forEachIndexed   // not ready yet
                 val subset = ArrayList<Int>()
                 var j = ord
                 while (j < beacons.size) { subset.add(j); j += n }
@@ -183,53 +239,68 @@ class BeaconAdvertiserService : Service() {
 
                 val beaconIndex = subset[slot.step % subset.size]
                 slot.step++
-                reprogram(slot, beacons[beaconIndex])
+                try {
+                    set.setAdvertisingData(buildData(beacons[beaconIndex]))
+                } catch (e: Exception) {
+                    Log.w(TAG, "Slot ${slot.id} rotate failed", e)
+                }
                 advertisedCount++
                 lastInstance = Eddystone.beaconId(beaconIndex + 1)
             }
 
             val sweeps = if (beacons.isEmpty()) 0L else advertisedCount / beacons.size
-            AdvertiserStatus.update {
-                it.copy(
-                    activeAdvertisers = n,
-                    cycles = sweeps,
-                    lastInstanceHex = lastInstance
-                )
+            if (lastInstance.isNotEmpty()) {
+                AdvertiserStatus.update {
+                    it.copy(cycles = sweeps, lastInstanceHex = lastInstance)
+                }
             }
 
             worker.postDelayed(this, dwellMs)
         }
     }
 
-    private fun reprogram(slot: Slot, serviceData: ByteArray) {
-        val data = AdvertiseData.Builder()
+    private fun publishRunningStatus() {
+        val activeCount = slots.count { it.started && !it.failed }
+        AdvertiserStatus.update {
+            it.copy(
+                running = true,
+                activeAdvertisers = activeCount,
+                message = "Advertising ${beacons.size} beacons across " +
+                    "$activeCount advertiser(s)."
+            )
+        }
+    }
+
+    private fun buildData(serviceData: ByteArray): AdvertiseData =
+        AdvertiseData.Builder()
             .setIncludeDeviceName(false)
             .setIncludeTxPowerLevel(false)
             .addServiceUuid(Eddystone.SERVICE_PARCEL_UUID)
             .addServiceData(Eddystone.SERVICE_PARCEL_UUID, serviceData)
             .build()
-        try {
-            if (slot.started) advertiser.stopAdvertising(slot)
-            advertiser.startAdvertising(settings, data, slot)
-            slot.started = true
-        } catch (e: Exception) {
-            AdvertiserStatus.update { it.copy(message = "Advertise error: ${e.message}") }
+
+    private fun fail(message: String) {
+        Log.e(TAG, message)
+        AdvertiserStatus.update {
+            it.copy(running = false, activeAdvertisers = 0, message = message)
         }
     }
 
     private fun stopAdvertisingAndSelf() {
         worker.removeCallbacksAndMessages(null)
-        if (available && ::slots.isInitialized) {
+        val adv = advertiser
+        if (adv != null) {
             slots.forEach { slot ->
                 if (slot.started) {
                     try {
-                        advertiser.stopAdvertising(slot)
+                        adv.stopAdvertisingSet(slot.callback)
                     } catch (_: Exception) {
                     }
                     slot.started = false
                 }
             }
         }
+        slots = emptyList()
         AdvertiserStatus.update {
             it.copy(running = false, activeAdvertisers = 0, message = "Stopped.")
         }
@@ -243,16 +314,24 @@ class BeaconAdvertiserService : Service() {
         super.onDestroy()
     }
 
+    private fun decode(status: Int): String = when (status) {
+        AdvertisingSetCallback.ADVERTISE_SUCCESS -> "SUCCESS"
+        AdvertisingSetCallback.ADVERTISE_FAILED_DATA_TOO_LARGE -> "DATA_TOO_LARGE"
+        AdvertisingSetCallback.ADVERTISE_FAILED_TOO_MANY_ADVERTISERS -> "TOO_MANY_ADVERTISERS"
+        AdvertisingSetCallback.ADVERTISE_FAILED_ALREADY_STARTED -> "ALREADY_STARTED"
+        AdvertisingSetCallback.ADVERTISE_FAILED_INTERNAL_ERROR -> "INTERNAL_ERROR"
+        AdvertisingSetCallback.ADVERTISE_FAILED_FEATURE_UNSUPPORTED -> "FEATURE_UNSUPPORTED"
+        else -> "code $status"
+    }
+
     private fun startForegroundCompat() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "BLE Simulator",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply { description = "Eddystone beacon advertising" }
-            nm.createNotificationChannel(channel)
-        }
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "BLE Simulator",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply { description = "Eddystone beacon advertising" }
+        nm.createNotificationChannel(channel)
 
         val notification: Notification = NotificationCompatBuilder.build(this, CHANNEL_ID)
 

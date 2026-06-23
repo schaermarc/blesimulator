@@ -34,8 +34,28 @@ unique beacons within one sweep.
 Example: 50 beacons, dwell 250 ms, 1 advertiser → a full sweep takes
 `50 × 250 ms ≈ 12.5 s`. With 4 working advertisers it drops to ~3 s.
 
+Rotation uses the modern `BluetoothLeAdvertiser.startAdvertisingSet()` API and
+swaps the payload live with `AdvertisingSet.setAdvertisingData()`. This avoids
+the legacy `stopAdvertising()/startAdvertising()` churn, which races on many
+stacks (notably Samsung) and silently dies after the first cycle. Sets are
+advertised in **legacy PDU mode** so every scanner can see them.
+
 Advertising runs in a **foreground service**, so it keeps going with the screen
 off until you press **Stop**.
+
+### Troubleshooting
+
+If the sniffer sees nothing, watch the app's status text — it reports
+"Advertising N beacons across K advertiser(s)" on success, or the exact failure
+reason otherwise. For full detail, connect via USB and run:
+
+```bash
+adb logcat -s BleSim
+```
+
+You'll see capability info (`multiAdv`, `extendedAdv`, `maxAdvDataLen`), each
+slot starting, and any failure code (e.g. `DATA_TOO_LARGE`, `ALREADY_STARTED`).
+Make sure Bluetooth is on and the *Nearby devices* permission is granted.
 
 ## Eddystone-UID frame
 
@@ -82,7 +102,8 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## Requirements on the device
 
-- Android 5.0+ (API 21). Tested target is Android 14 (API 34).
+- Android 8.0+ (API 26 — required for the `AdvertisingSet` rotation API).
+  Tested target is Android 14 (API 34); confirmed building against Android 16.
 - A device whose Bluetooth chipset supports **BLE peripheral / advertising mode**
   (most modern phones do; a few older/budget ones don't).
 - Bluetooth turned on; *Nearby devices* (BLUETOOTH_ADVERTISE) permission granted.
