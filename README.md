@@ -24,15 +24,45 @@ ID for a short *dwell* time, then switches to the next. A sniffer that
 aggregates detections over time (like the Abeeway sniffer) therefore sees all 50
 unique beacons within one sweep.
 
-- **Dwell (ms)** — how long each beacon is advertised before rotating. Lower =
-  faster sweep, but each beacon is on-air for less time.
-- **Parallel advertisers** — how many beacons to broadcast at the same instant.
-  More = a full sweep finishes sooner. If the hardware refuses extra advertisers
-  (`TOO_MANY_ADVERTISERS`), those slots self-retire and the remaining ones
-  automatically re-partition the beacon set, so **every** beacon is still covered.
+### Two modes
 
-Example: 50 beacons, dwell 250 ms, 1 advertiser → a full sweep takes
-`50 × 250 ms ≈ 12.5 s`. With 4 working advertisers it drops to ~3 s.
+The mode toggle at the top picks how the rotation is configured:
+
+- **Dwell mode** (manual) — you set the **dwell** and the number of **parallel
+  advertisers** directly.
+  - *Dwell (ms)* — how long each beacon is advertised before rotating.
+  - *Parallel advertisers* — how many beacons broadcast at the same instant.
+    More = a full sweep finishes sooner. If the hardware refuses extra
+    advertisers (`TOO_MANY_ADVERTISERS`), those slots self-retire and the
+    remaining ones re-partition the beacon set, so **every** beacon is still
+    covered.
+  - Example: 50 beacons, dwell 250 ms, 1 advertiser → a full sweep takes
+    `50 × 250 ms ≈ 12.5 s`. With 4 advertisers it drops to ~3 s.
+
+- **Interval mode** (automatic) — you set how often **each unique beacon** should
+  be broadcast (ms) plus the beacon count and Tx power; the app **computes the
+  dwell and advertiser count** for you and shows the result live, including the
+  effective interval when the target can't be met on the hardware. The plan
+  picks the fewest advertisers (capped at 4) that keep the dwell at or above
+  100 ms — see `IntervalPlanner.kt`.
+  - Example: 50 beacons every 1000 ms → 5… capped to 4 advertisers, dwell
+    100 ms, effective ~1300 ms. 5 beacons every 1000 ms → 1 advertiser, dwell
+    200 ms, exactly 1000 ms.
+
+### Tx power
+
+A **Tx power** selector controls the radio transmit power, which is what changes
+the RSSI the sniffer reports:
+
+| Level     | Radio power | Eddystone ranging byte |
+|-----------|-------------|------------------------|
+| Ultra low | −21 dBm     | −21 dBm                |
+| Low       | −15 dBm     | −15 dBm                |
+| Medium    | −7 dBm      | −7 dBm                 |
+| High      | +1 dBm      | +1 dBm                 |
+
+The chosen level also sets the Eddystone-UID *ranging data* byte (calibrated
+power at 0 m) to the matching nominal value. Default is **High**.
 
 Rotation uses the modern `BluetoothLeAdvertiser.startAdvertisingSet()` API and
 swaps the payload live with `AdvertisingSet.setAdvertisingData()`. This avoids
@@ -64,7 +94,7 @@ Each beacon advertises Service Data for the 16-bit Eddystone UUID `0xFEAA`:
 | Bytes | Field        | Value                                  |
 |-------|--------------|----------------------------------------|
 | 0     | Frame type   | `0x00` (UID)                           |
-| 1     | Ranging data | calibrated Tx power @ 0 m (default −21) |
+| 1     | Ranging data | calibrated Tx power @ 0 m (from the Tx power selector) |
 | 2–11  | Namespace ID | 10 bytes, shared by all beacons        |
 | 12–17 | Instance ID  | 6 bytes, low 2 bytes = `0x9000 + n`    |
 | 18–19 | RFU          | `0x00 0x00`                            |
@@ -93,7 +123,8 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
 1. Launch **Eddystone Beacon Simulator**.
-2. (Optional) edit the Namespace ID, beacon count, dwell, and parallel advertisers.
+2. Pick **Dwell mode** or **Interval mode**, set the Tx power, and (optionally)
+   edit the Namespace ID, beacon count, and the mode-specific timing fields.
 3. Tap **Start**. Grant the *Nearby devices* permission and enable Bluetooth when
    prompted.
 4. Point the Abeeway sniffer at it — it should report 50 distinct Eddystone-UID
@@ -113,6 +144,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 app/src/main/java/com/abeeway/blesimulator/
   Eddystone.kt                 # UID frame + Instance ID generation
+  IntervalPlanner.kt           # interval -> (dwell, advertisers) computation
   BeaconAdvertiserService.kt   # foreground service, rotation + self-healing
   AdvertiserStatus.kt          # service → UI status bus
   NotificationCompatBuilder.kt # foreground notification

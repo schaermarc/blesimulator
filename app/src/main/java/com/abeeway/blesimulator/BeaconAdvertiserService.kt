@@ -45,7 +45,7 @@ class BeaconAdvertiserService : Service() {
         const val EXTRA_COUNT = "count"           // number of beacons
         const val EXTRA_DWELL_MS = "dwellMs"      // per-beacon advertise time
         const val EXTRA_CONCURRENCY = "concurrency"
-        const val EXTRA_TX_POWER = "txPower"      // ranging data (dBm)
+        const val EXTRA_TX_POWER_LEVEL = "txPowerLevel"  // 0..3 (ultra-low..high)
 
         const val TAG = "BleSim"
         private const val CHANNEL_ID = "ble_simulator"
@@ -159,7 +159,10 @@ class BeaconAdvertiserService : Service() {
         val count = intent.getIntExtra(EXTRA_COUNT, 50).coerceIn(1, 1000)
         dwellMs = intent.getIntExtra(EXTRA_DWELL_MS, 250).toLong().coerceIn(50, 10_000)
         val concurrency = intent.getIntExtra(EXTRA_CONCURRENCY, 1).coerceIn(1, 8)
-        val txPower = intent.getIntExtra(EXTRA_TX_POWER, -21)
+        val txLevel = intent.getIntExtra(EXTRA_TX_POWER_LEVEL, 3).coerceIn(0, 3)
+        // The Eddystone ranging-data byte advertises the calibrated power at 0 m,
+        // so set it to the nominal dBm of the chosen radio Tx power level.
+        val rangingDbm = nominalDbm(txLevel)
 
         val namespace = try {
             Eddystone.hexToBytes(namespaceHex, Eddystone.NAMESPACE_LEN)
@@ -168,7 +171,7 @@ class BeaconAdvertiserService : Service() {
             return
         }
         beacons = Eddystone.sequentialInstances(count).map { instance ->
-            Eddystone.uidServiceData(namespace, instance, txPower)
+            Eddystone.uidServiceData(namespace, instance, rangingDbm)
         }
 
         // Legacy-mode PDU so every scanner (the Abeeway sniffer, other phones)
@@ -178,7 +181,7 @@ class BeaconAdvertiserService : Service() {
             .setConnectable(false)
             .setScannable(false)
             .setInterval(AdvertisingSetParameters.INTERVAL_LOW)
-            .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_HIGH)
+            .setTxPowerLevel(radioTxLevel(txLevel))
             .build()
 
         slots = (0 until concurrency).map { Slot(it) }
@@ -198,7 +201,6 @@ class BeaconAdvertiserService : Service() {
         }
 
         // Kick off one advertising set per slot with its first payload.
-        val n = slots.size
         slots.forEachIndexed { ord, slot ->
             val firstIndex = ord            // modulo partition, first element
             if (firstIndex >= beacons.size) return@forEachIndexed
@@ -312,6 +314,22 @@ class BeaconAdvertiserService : Service() {
         worker.removeCallbacksAndMessages(null)
         workerThread.quitSafely()
         super.onDestroy()
+    }
+
+    /** Maps a 0..3 UI selection to an AdvertisingSetParameters Tx power level. */
+    private fun radioTxLevel(level: Int): Int = when (level) {
+        0 -> AdvertisingSetParameters.TX_POWER_ULTRA_LOW
+        1 -> AdvertisingSetParameters.TX_POWER_LOW
+        2 -> AdvertisingSetParameters.TX_POWER_MEDIUM
+        else -> AdvertisingSetParameters.TX_POWER_HIGH
+    }
+
+    /** Nominal dBm for each Tx power level, used for the Eddystone ranging byte. */
+    private fun nominalDbm(level: Int): Int = when (level) {
+        0 -> -21
+        1 -> -15
+        2 -> -7
+        else -> 1
     }
 
     private fun decode(status: Int): String = when (status) {
