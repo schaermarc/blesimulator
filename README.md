@@ -102,6 +102,19 @@ Each beacon advertises Service Data for the 16-bit Eddystone UUID `0xFEAA`:
 Advertised non-connectable, which fits the Eddystone payload within the 31-byte
 legacy advertising limit.
 
+## Minimum requirements to install & run
+
+| Requirement | Minimum | Notes |
+|-------------|---------|-------|
+| Android version | **8.0 Oreo (API level 26)** | The app's `minSdk` is 26; older devices can't install it. Required by the `AdvertisingSet` advertising API. |
+| Target / tested | Android 14 (API 34) | Builds against Android 16; verified on a Galaxy S23 (Android 16). |
+| Bluetooth | **BLE 4.0+ with peripheral (advertising) support** | The chipset must be able to *advertise*, not just scan. Most phones from ~2015 on can; a few budget/older models can't — if advertising isn't supported the app shows "This device does not support BLE advertising." |
+| Bluetooth state | Turned **on** | The app prompts to enable it if it's off. |
+| Permission | **Nearby devices** (`BLUETOOTH_ADVERTISE`) | Granted at runtime on first Start. On Android 13+ the app also asks for notification permission for its foreground-service notice. |
+| Storage | ~6 MB | APK is ~5.6 MB. |
+
+No internet connection, account, or Google Play Services are required.
+
 ## Build
 
 Open in Android Studio (Giraffe+), or from the command line:
@@ -130,14 +143,6 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 4. Point the Abeeway sniffer at it — it should report 50 distinct Eddystone-UID
    beacons sharing the namespace.
 5. Tap **Stop** when done.
-
-## Requirements on the device
-
-- Android 8.0+ (API 26 — required for the `AdvertisingSet` rotation API).
-  Tested target is Android 14 (API 34); confirmed building against Android 16.
-- A device whose Bluetooth chipset supports **BLE peripheral / advertising mode**
-  (most modern phones do; a few older/budget ones don't).
-- Bluetooth turned on; *Nearby devices* (BLUETOOTH_ADVERTISE) permission granted.
 
 ## Project layout
 
