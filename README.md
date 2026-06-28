@@ -4,13 +4,15 @@ An Android app that simulates many **Eddystone-UID** beacons that all share one
 **Namespace ID** but each have a **unique Instance ID** — built to exercise the
 **Abeeway BLE sniffer** (or any aggregating BLE scanner).
 
-By default it simulates **50 beacons**: namespace `0102030405060708090A`,
-instance IDs `0x000000009001 … 0x000000009032`.
+It launches in **Interval mode** with sensible defaults: **20 beacons**,
+namespace `626C756B626561636F6E`, each beacon broadcast every **2000 ms** at
+**−7 dBm** (Medium) Tx power. Instance IDs run `0x000000009001 … 0x000000009014`.
+Everything is editable in the UI.
 
 > **beaconId prefix `9`:** The Abeeway sniffer only reports the **last two
 > bytes** of the Instance ID as the `beaconId`. To make those values
 > recognisable, the low two bytes are `0x9000 + n`, so the sniffer shows
-> `9001`, `9002`, … `9032` (beacon #3 → `"beaconId": "9003"`). The prefix is
+> `9001`, `9002`, … (beacon #3 → `"beaconId": "9003"`). The prefix is
 > the `BEACON_ID_PREFIX` constant in `Eddystone.kt`.
 
 ## How it works (important)
@@ -62,7 +64,7 @@ the RSSI the sniffer reports:
 | High      | +1 dBm      | +1 dBm                 |
 
 The chosen level also sets the Eddystone-UID *ranging data* byte (calibrated
-power at 0 m) to the matching nominal value. Default is **High**.
+power at 0 m) to the matching nominal value. Default is **Medium (−7 dBm)**.
 
 Rotation uses the modern `BluetoothLeAdvertiser.startAdvertisingSet()` API and
 swaps the payload live with `AdvertisingSet.setAdvertisingData()`. This avoids

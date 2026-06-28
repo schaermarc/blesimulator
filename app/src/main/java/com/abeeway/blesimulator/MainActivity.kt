@@ -44,14 +44,14 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        binding.namespaceInput.setText("0102030405060708090A")
-        binding.countInput.setText("50")
+        binding.namespaceInput.setText("626C756B626561636F6E")
+        binding.countInput.setText("20")
         binding.dwellInput.setText("250")
         binding.concurrencyInput.setText("1")
-        binding.intervalInput.setText("1000")
-        binding.txPowerSpinner.setSelection(TX_POWER_HIGH) // strongest by default
+        binding.intervalInput.setText("2000")
+        binding.txPowerSpinner.setSelection(TX_POWER_MEDIUM) // -7 dBm by default
 
-        binding.modeToggle.check(R.id.btnDwellMode)
+        binding.modeToggle.check(R.id.btnIntervalMode)
         binding.modeToggle.addOnButtonCheckedListener { _, _, _ -> onModeChanged() }
 
         val recompute = object : TextWatcher {
@@ -225,6 +225,6 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         // Spinner positions, must match the tx_power_levels string-array order.
-        private const val TX_POWER_HIGH = 3
+        private const val TX_POWER_MEDIUM = 2
     }
 }
