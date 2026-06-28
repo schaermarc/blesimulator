@@ -33,6 +33,22 @@ object IntervalPlanner {
     ) {
         /** True when the achievable interval matches the requested one. */
         fun meetsTarget(targetMs: Int): Boolean = effectiveIntervalMs <= targetMs
+
+        /** Guaranteed (worst-case phase) broadcasts of each beacon per [windowMs]. */
+        fun broadcastsPerWindow(windowMs: Int): Int =
+            if (effectiveIntervalMs <= 0) 0 else windowMs / effectiveIntervalMs
+    }
+
+    /**
+     * Plans for "each beacon broadcast at least [reps] times within a
+     * [windowMs] sniffer scan window". The required per-beacon interval is
+     * `windowMs / reps`; a sweep at or below that period yields at least [reps]
+     * appearances in any window of that length.
+     */
+    fun planForWindow(count: Int, windowMs: Int, reps: Int): Plan {
+        val r = reps.coerceAtLeast(1)
+        val requiredInterval = (windowMs.coerceAtLeast(1) / r).coerceAtLeast(MIN_DWELL_MS)
+        return plan(count, requiredInterval)
     }
 
     fun plan(count: Int, intervalMs: Int): Plan {

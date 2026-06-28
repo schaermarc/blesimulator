@@ -13,10 +13,11 @@
     <string name="hint_txpower">Tx power</string>
     <string name="hint_dwell">Dwell per beacon (ms)</string>
     <string name="hint_concurrency">Parallel advertisers</string>
-    <string name="hint_interval">Broadcast interval per beacon (ms)</string>
+    <string name="hint_window">Sniffer scan window (ms)</string>
+    <string name="hint_reps">Min broadcasts / window</string>
 
     <string name="help_dwell">Instance IDs are 0x…9001…N. Lower dwell + more parallel advertisers = faster full sweep. Most phones only allow a few parallel advertisers; extras self-retire and the rest cover all beacons.</string>
-    <string name="help_interval">How often each unique beacon is broadcast. The app computes the dwell time and number of advertisers automatically.</string>
+    <string name="help_interval">Each unique beacon is broadcast at least this many times within the sniffer scan window. The app derives the required interval and computes the dwell time and number of advertisers automatically.</string>
 
     <string name="start">Start</string>
     <string name="stop">Stop</string>

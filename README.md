@@ -5,9 +5,9 @@ An Android app that simulates many **Eddystone-UID** beacons that all share one
 **Abeeway BLE sniffer** (or any aggregating BLE scanner).
 
 It launches in **Interval mode** with sensible defaults: **20 beacons**,
-namespace `626C756B626561636F6E`, each beacon broadcast every **2000 ms** at
-**−7 dBm** (Medium) Tx power. Instance IDs run `0x000000009001 … 0x000000009014`.
-Everything is editable in the UI.
+namespace `626C756B626561636F6E`, each beacon broadcast at least **2×** within a
+**6000 ms** sniffer scan window, at **−7 dBm** (Medium) Tx power. Instance IDs
+run `0x000000009001 … 0x000000009014`. Everything is editable in the UI.
 
 > **beaconId prefix `9`:** The Abeeway sniffer only reports the **last two
 > bytes** of the Instance ID as the `beaconId`. To make those values
@@ -41,15 +41,23 @@ The mode toggle at the top picks how the rotation is configured:
   - Example: 50 beacons, dwell 250 ms, 1 advertiser → a full sweep takes
     `50 × 250 ms ≈ 12.5 s`. With 4 advertisers it drops to ~3 s.
 
-- **Interval mode** (automatic) — you set how often **each unique beacon** should
-  be broadcast (ms) plus the beacon count and Tx power; the app **computes the
-  dwell and advertiser count** for you and shows the result live, including the
-  effective interval when the target can't be met on the hardware. The plan
-  picks the fewest advertisers (capped at 4) that keep the dwell at or above
-  100 ms — see `IntervalPlanner.kt`.
-  - Example: 50 beacons every 1000 ms → 5… capped to 4 advertisers, dwell
-    100 ms, effective ~1300 ms. 5 beacons every 1000 ms → 1 advertiser, dwell
-    200 ms, exactly 1000 ms.
+- **Interval mode** (automatic) — you set the **sniffer scan window** (ms) and
+  the **minimum number of broadcasts** each unique beacon must get within that
+  window, plus the beacon count and Tx power. The app derives the required
+  per-beacon interval (`window / repetitions`) and **computes the dwell and
+  advertiser count** so every beacon is guaranteed to appear at least that many
+  times in any scan window of that length. It shows the result live, including
+  the actual broadcasts-per-window — and warns when the hardware can't meet the
+  target. The plan picks the fewest advertisers (capped at 4) that keep the
+  dwell at or above 100 ms — see `IntervalPlanner.kt`.
+  - Why: a beacon recurring every `T` ms appears `floor(window / T)` times in a
+    window of that length (worst-case phase). Requiring `T ≤ window / reps`
+    therefore guarantees at least `reps` appearances.
+  - Example: 20 beacons, 6000 ms window, 2 broadcasts → required interval
+    3000 ms → 1 advertiser, dwell 150 ms, each beacon every ~3000 ms = 2× per
+    window. 50 beacons, 2000 ms window, 2 broadcasts → required 1000 ms, but
+    that needs 5 advertisers → capped to 4, effective ~1300 ms = only 1× per
+    window (a warning is shown).
 
 ### Tx power
 
