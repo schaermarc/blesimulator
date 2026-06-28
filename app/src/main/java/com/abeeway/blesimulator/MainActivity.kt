@@ -48,6 +48,7 @@ class MainActivity : AppCompatActivity() {
         binding.countInput.setText("20")
         binding.dwellInput.setText("250")
         binding.concurrencyInput.setText("1")
+        binding.intervalInput.setText("2000")
         binding.windowInput.setText("6000")
         binding.repsInput.setText("2")
         binding.txPowerSpinner.setSelection(TX_POWER_MEDIUM) // -7 dBm by default
@@ -61,6 +62,7 @@ class MainActivity : AppCompatActivity() {
             override fun afterTextChanged(s: Editable?) = updateComputedPlan()
         }
         binding.countInput.addTextChangedListener(recompute)
+        binding.intervalInput.addTextChangedListener(recompute)
         binding.windowInput.addTextChangedListener(recompute)
         binding.repsInput.addTextChangedListener(recompute)
 
@@ -89,22 +91,28 @@ class MainActivity : AppCompatActivity() {
     private fun updateComputedPlan() {
         if (!intervalMode) return
         val count = binding.countInput.text.toString().toIntOrNull()
+        val interval = binding.intervalInput.text.toString().toIntOrNull()
         val window = binding.windowInput.text.toString().toIntOrNull()
         val reps = binding.repsInput.text.toString().toIntOrNull()
-        if (count == null || count < 1 || window == null || window < 1 || reps == null || reps < 1) {
-            binding.computedText.text = "Enter beacon count, scan window, and min broadcasts."
+        if (count == null || count < 1 || interval == null || interval < 1 ||
+            window == null || window < 1 || reps == null || reps < 1
+        ) {
+            binding.computedText.text = "Enter beacon count, interval, scan window, and min broadcasts."
             return
         }
-        val plan = IntervalPlanner.planForWindow(count, window, reps)
+        val plan = IntervalPlanner.planForWindow(count, interval, window, reps)
         val actualReps = plan.broadcastsPerWindow(window)
         val sb = StringBuilder()
         sb.append("Auto: dwell ${plan.dwellMs} ms · ${plan.advertisers} advertiser(s)\n")
         sb.append("Each beacon every ~${plan.effectiveIntervalMs} ms ")
         sb.append("→ ${actualReps}× per ${window} ms window")
+        if (plan.effectiveIntervalMs < interval) {
+            sb.append("\nInterval tightened from ${interval} ms to fit ≥${reps}× per window.")
+        }
         if (actualReps < reps) {
-            sb.append("\n⚠ Can't reach ${reps}× for $count beacons in ${window} ms " +
+            sb.append("\n⚠ Can't fit ${reps}× for $count beacons in ${window} ms " +
                 "(max ${IntervalPlanner.MAX_ADVERTISERS} advertisers). Increase the " +
-                "window, lower the beacon count, or lower the repetitions.")
+                "window, lower the beacon count, or lower the min broadcasts.")
         }
         binding.computedText.text = sb.toString()
     }
@@ -123,8 +131,13 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (intervalMode) {
+            val interval = binding.intervalInput.text.toString().toIntOrNull()
             val window = binding.windowInput.text.toString().toIntOrNull()
             val reps = binding.repsInput.text.toString().toIntOrNull()
+            if (interval == null || interval < 1) {
+                toast("Enter a valid beacon interval (ms).")
+                return
+            }
             if (window == null || window < 1) {
                 toast("Enter a valid sniffer scan window (ms).")
                 return
@@ -157,9 +170,10 @@ class MainActivity : AppCompatActivity() {
         val dwellMs: Int
         val concurrency: Int
         if (intervalMode) {
+            val interval = binding.intervalInput.text.toString().toInt()
             val window = binding.windowInput.text.toString().toInt()
             val reps = binding.repsInput.text.toString().toInt()
-            val plan = IntervalPlanner.planForWindow(count, window, reps)
+            val plan = IntervalPlanner.planForWindow(count, interval, window, reps)
             dwellMs = plan.dwellMs
             concurrency = plan.advertisers
         } else {
@@ -209,6 +223,7 @@ class MainActivity : AppCompatActivity() {
         binding.countInput.isEnabled = enabled
         binding.dwellInput.isEnabled = enabled
         binding.concurrencyInput.isEnabled = enabled
+        binding.intervalInput.isEnabled = enabled
         binding.windowInput.isEnabled = enabled
         binding.repsInput.isEnabled = enabled
         binding.txPowerSpinner.isEnabled = enabled

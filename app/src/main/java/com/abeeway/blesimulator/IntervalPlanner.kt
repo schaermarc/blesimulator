@@ -40,15 +40,22 @@ object IntervalPlanner {
     }
 
     /**
-     * Plans for "each beacon broadcast at least [reps] times within a
-     * [windowMs] sniffer scan window". The required per-beacon interval is
-     * `windowMs / reps`; a sweep at or below that period yields at least [reps]
-     * appearances in any window of that length.
+     * Plans for a desired [beaconIntervalMs] per-beacon broadcast period, while
+     * guaranteeing each beacon appears at least [reps] times within a [windowMs]
+     * sniffer scan window.
+     *
+     * A beacon recurring every `T` appears `floor(window / T)` times in a window
+     * of that length (worst-case phase), so the minimum-broadcasts floor caps
+     * the effective period at `window / reps`. The binding period is therefore
+     * `min(beaconIntervalMs, window / reps)`. When that is tighter than the
+     * beacon interval, [plan] keeps the dwell at or above [MIN_DWELL_MS] by
+     * adding advertisers — which is how the floor "makes it fit".
      */
-    fun planForWindow(count: Int, windowMs: Int, reps: Int): Plan {
+    fun planForWindow(count: Int, beaconIntervalMs: Int, windowMs: Int, reps: Int): Plan {
         val r = reps.coerceAtLeast(1)
-        val requiredInterval = (windowMs.coerceAtLeast(1) / r).coerceAtLeast(MIN_DWELL_MS)
-        return plan(count, requiredInterval)
+        val byWindow = windowMs.coerceAtLeast(1) / r
+        val required = minOf(beaconIntervalMs, byWindow).coerceAtLeast(MIN_DWELL_MS)
+        return plan(count, required)
     }
 
     fun plan(count: Int, intervalMs: Int): Plan {
