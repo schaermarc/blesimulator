@@ -4,6 +4,11 @@ An Android app that simulates many **Eddystone-UID** beacons that all share one
 **Namespace ID** but each have a **unique Instance ID** — built to exercise the
 **Abeeway BLE sniffer** (or any aggregating BLE scanner).
 
+> **Android only — no iPhone version is possible.** iOS forbids apps from
+> advertising the BLE *service data* that Eddystone requires, so an iPhone
+> physically cannot emit these beacons. See [docs/iOS.md](docs/iOS.md) for the
+> details and hardware alternatives.
+
 It launches in **Interval mode** with sensible defaults: **20 beacons**,
 namespace `626C756B626561636F6E`, a **2000 ms** beacon interval, each beacon
 broadcast at least **2×** within a **6000 ms** sniffer scan window, at **−7 dBm**
