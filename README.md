@@ -1,4 +1,4 @@
-# Eddystone Beacon Simulator
+# Eddystone UID Beacon Simulator
 
 An Android app that simulates many **Eddystone-UID** beacons that all share one
 **Namespace ID** but each have a **unique Instance ID** — built to exercise the
@@ -127,7 +127,7 @@ legacy advertising limit.
 | Permission | **Nearby devices** (`BLUETOOTH_ADVERTISE`) | Granted at runtime on first Start. On Android 13+ the app also asks for notification permission for its foreground-service notice. |
 | Storage | ~6 MB | APK is ~5.6 MB. |
 
-No internet connection, account, or Google Play Services are required.
+No internet connection, account, or Google Play Services are required. Apple devices are not supported.
 
 ## Build
 
